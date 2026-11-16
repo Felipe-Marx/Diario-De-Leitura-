@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,37 +12,37 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 import * as ImagePicker from 'expo-image-picker';
+import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 
-import { createBook, getReaderProfile } from '@/db/books';
-import { getReaderTheme, normalizeReaderThemeKey, type ReaderThemeKey } from '@/constants/reader-themes';
+import { createBook } from '@/db/books';
+import { getReaderTheme, normalizeReaderThemeKey } from '@/constants/reader-themes';
 import { searchGoogleBooks, type GoogleBook } from '@/services/google-books';
 import { saveImagePermanently } from '@/services/local-images';
+import { useReaderProfile } from '@/providers/reader-profile';
 
 export default function AddBookScreen() {
   const database = useSQLiteContext();
-  const [themeKey, setThemeKey] = useState<ReaderThemeKey>('classic');
+  const { profile, loading: profileLoading } = useReaderProfile();
   const [searchTerm, setSearchTerm] = useState('');
   const [results, setResults] = useState<GoogleBook[]>([]);
   const [selectedBook, setSelectedBook] = useState<GoogleBook | null>(null);
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [totalPages, setTotalPages] = useState('');
+  const [format, setFormat] = useState<'fisico' | 'kindle'>('fisico');
+  const [startedAt, setStartedAt] = useState('');
+  const [completedAt, setCompletedAt] = useState('');
+  const [openDatePicker, setOpenDatePicker] = useState<'started' | 'completed' | null>(null);
   const [customCoverUri, setCustomCoverUri] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    void getReaderProfile(database).then((profile) => {
-      const savedTheme = profile?.theme_key;
-      setThemeKey(normalizeReaderThemeKey(savedTheme));
-    });
-  }, [database]);
-
-  const theme = getReaderTheme(themeKey);
+  const theme = getReaderTheme(normalizeReaderThemeKey(profile?.theme_key));
 
   async function handleSearch() {
     if (!searchTerm.trim()) {
@@ -93,6 +93,16 @@ export default function AddBookScreen() {
       Alert.alert('Confira os dados', 'Informe título, autor e um número de páginas maior que zero.');
       return;
     }
+    const isValidDate = (value: string) => {
+      if (!value.trim()) return true;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const parsed = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+    };
+    if (!isValidDate(startedAt) || !isValidDate(completedAt) || (startedAt && completedAt && completedAt < startedAt)) {
+      Alert.alert('Confira as datas', 'A conclusão não pode ser anterior ao início da leitura.');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -100,10 +110,13 @@ export default function AddBookScreen() {
         title,
         author,
         total_pages: pageCount,
+        format,
         google_volume_id: selectedBook?.id ?? null,
         google_info_link: selectedBook?.infoLink ?? null,
         google_cover_uri: selectedBook?.coverUri ?? null,
         custom_cover_uri: customCoverUri,
+        started_at: startedAt.trim() || null,
+        completed_at: completedAt.trim() || null,
       });
       router.back();
     } catch {
@@ -114,6 +127,10 @@ export default function AddBookScreen() {
   }
 
   const displayedCover = customCoverUri ?? selectedBook?.coverUri ?? null;
+
+  if (profileLoading || !profile) {
+    return <SafeAreaView style={styles.loadingScreen}><ActivityIndicator color="#777B70" /></SafeAreaView>;
+  }
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
@@ -134,7 +151,7 @@ export default function AddBookScreen() {
           <Image
             source={require('../../assets/images/google-books-powered-by.png')}
             style={styles.googleBrandImage}
-            resizeMode="contain"
+            contentFit="contain"
             accessibilityLabel="Powered by Google"
           />
         </Pressable>
@@ -159,7 +176,7 @@ export default function AddBookScreen() {
             {results.map((book) => (
               <View key={book.id} style={[styles.resultRow, { borderTopColor: theme.line }]}>
                 <Pressable accessibilityRole="button" accessibilityLabel={`Adicionar ${book.title} de ${book.author}`} style={styles.resultSelect} onPress={() => selectResult(book)}>
-                  {book.coverUri ? <Image source={{ uri: book.coverUri }} style={styles.resultCover} /> : <View style={[styles.resultCover, styles.coverPlaceholder]}><Text>✳</Text></View>}
+                  {book.coverUri ? <Image source={{ uri: book.coverUri }} style={styles.resultCover} contentFit="cover" cachePolicy="disk" /> : <View style={[styles.resultCover, styles.coverPlaceholder]}><Text>✳</Text></View>}
                   <View style={styles.resultText}>
                     <Text style={[styles.resultBookTitle, { color: theme.ink, fontFamily: theme.headingFont }]} numberOfLines={2}>{book.title}</Text>
                     <Text style={[styles.resultAuthor, { color: theme.muted }]} numberOfLines={1}>{book.author}</Text>
@@ -190,9 +207,17 @@ export default function AddBookScreen() {
         <Text style={[styles.label, { color: theme.ink }]}>Número de páginas</Text>
         <TextInput accessibilityLabel="Número total de páginas" value={totalPages} onChangeText={setTotalPages} placeholder="Ex.: 240" placeholderTextColor={theme.muted} style={[styles.input, { backgroundColor: theme.paper, borderColor: theme.line, color: theme.ink }]} keyboardType="number-pad" />
 
+        <Text style={[styles.label, { color: theme.ink }]}>Formato do livro</Text>
+        <View style={styles.formatOptions}>
+          {([{ value: 'fisico', label: 'Físico' }, { value: 'kindle', label: 'eBook Kindle' }] as const).map((option) => <Pressable key={option.value} accessibilityRole="radio" accessibilityState={{ selected: format === option.value }} onPress={() => setFormat(option.value)} style={[styles.formatOption, { backgroundColor: format === option.value ? theme.soft : theme.paper, borderColor: format === option.value ? theme.accent : theme.line }]}><Text style={{ color: format === option.value ? theme.accent : theme.muted, fontSize: 12, fontWeight: '600' }}>{option.label}</Text></Pressable>)}
+        </View>
+
+        <ReadingDateField label="Data de início da leitura (opcional)" value={startedAt} onChange={setStartedAt} isOpen={openDatePicker === 'started'} onOpen={() => setOpenDatePicker('started')} onClose={() => setOpenDatePicker(null)} theme={theme} />
+        <ReadingDateField label="Data de conclusão (opcional)" value={completedAt} onChange={setCompletedAt} isOpen={openDatePicker === 'completed'} onOpen={() => setOpenDatePicker('completed')} onClose={() => setOpenDatePicker(null)} theme={theme} />
+
         <Text style={[styles.label, { color: theme.ink }]}>Capa</Text>
         <View style={[styles.coverEditor, { backgroundColor: theme.paper, borderColor: theme.line }]}>
-          {displayedCover ? <Image source={{ uri: displayedCover }} style={styles.coverPreview} /> : <View style={[styles.coverPreview, styles.coverPlaceholder]}><Text style={styles.coverFlower}>✳</Text></View>}
+          {displayedCover ? <Image source={{ uri: displayedCover }} style={styles.coverPreview} contentFit="cover" cachePolicy="disk" /> : <View style={[styles.coverPreview, styles.coverPlaceholder]}><Text style={styles.coverFlower}>✳</Text></View>}
           <View style={styles.coverActions}>
             <Text style={[styles.coverChoice, { color: theme.muted }]}>{customCoverUri ? 'Sua foto escolhida' : selectedBook?.coverUri ? 'Capa do Google Books' : 'Escolha uma capa'}</Text>
             <Pressable accessibilityRole="button" style={[styles.coverButton, { backgroundColor: theme.soft }]} onPress={() => void handlePickCover()}>
@@ -212,7 +237,59 @@ export default function AddBookScreen() {
   );
 }
 
+function ReadingDateField({ label, value, onChange, isOpen, onOpen, onClose, theme }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  theme: ReturnType<typeof getReaderTheme>;
+}) {
+  const selectedDate = value ? dateFromIso(value) : new Date();
+  return (
+    <View>
+      <Text style={[styles.label, { color: theme.ink }]}>{label}</Text>
+      <View style={[styles.dateField, { backgroundColor: theme.paper, borderColor: theme.line }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${value ? formatDate(value) : 'nenhuma data selecionada'}. Abrir calendário`} onPress={onOpen} style={styles.dateButton}>
+          <Text style={[styles.dateValue, { color: value ? theme.ink : theme.muted }]}>{value ? formatDate(value) : 'Selecionar data'}</Text>
+          <Text style={[styles.dateIcon, { color: theme.accent }]} accessibilityElementsHidden>▦</Text>
+        </Pressable>
+        {value ? <Pressable accessibilityRole="button" accessibilityLabel={`Limpar ${label}`} onPress={() => onChange('')} style={styles.clearDate}><Text style={[styles.clearDateText, { color: theme.accent }]}>Limpar</Text></Pressable> : null}
+      </View>
+      {isOpen ? (
+        <View style={[styles.datePickerBox, { backgroundColor: theme.paper, borderColor: theme.line }]}>
+          <DateTimePicker value={selectedDate} mode="date" display="inline" presentation={Platform.OS === 'android' ? 'dialog' : 'inline'} locale="pt_BR" accentColor={theme.accent} positiveButton={{ label: 'Confirmar' }} negativeButton={{ label: 'Cancelar' }} onValueChange={(_event, date) => { onChange(toIsoDate(date)); if (Platform.OS === 'android') onClose(); }} />
+          <Pressable accessibilityRole="button" onPress={onClose} style={[styles.dateDone, { backgroundColor: theme.accent }]}><Text style={[styles.dateDoneText, { color: theme.buttonText }]}>Concluir</Text></Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function dateFromIso(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+function toIsoDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatDate(value: string) {
+  return dateFromIso(value).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
 const styles = StyleSheet.create({
+  loadingScreen: { flex: 1, backgroundColor: '#171717', alignItems: 'center', justifyContent: 'center' },
+  dateField: { minHeight: 46, paddingLeft: 13, paddingRight: 10, borderWidth: 1, borderRadius: 10, flexDirection: 'row', alignItems: 'center' },
+  dateButton: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  dateValue: { fontSize: 13 },
+  dateIcon: { fontSize: 18, paddingHorizontal: 8 },
+  clearDate: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 7 },
+  clearDateText: { fontSize: 11, fontWeight: '700' },
+  datePickerBox: { marginTop: 8, padding: 8, borderWidth: 1, borderRadius: 12 },
+  dateDone: { minHeight: 42, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  dateDoneText: { fontSize: 12, fontWeight: '700' },
   safeArea: { flex: 1, backgroundColor: '#F7F4EC' },
   content: { paddingHorizontal: 22, paddingBottom: 35 },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
@@ -221,6 +298,8 @@ const styles = StyleSheet.create({
   title: { color: '#282D25', fontSize: 31, lineHeight: 35, fontWeight: '700', letterSpacing: -1, marginTop: 14 },
   subtitle: { color: '#777B70', fontSize: 13, lineHeight: 19, marginTop: 9, marginBottom: 19 },
   searchRow: { flexDirection: 'row', gap: 8 },
+  formatOptions: { flexDirection: 'row', gap: 9, marginTop: 4, marginBottom: 9 },
+  formatOption: { minHeight: 40, paddingHorizontal: 14, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   searchInput: { flex: 1, height: 48, borderRadius: 12, backgroundColor: '#FFFEFA', borderColor: '#E9E5DA', borderWidth: 1, paddingHorizontal: 14, color: '#282D25', fontSize: 14 },
   searchButton: { minWidth: 78, paddingHorizontal: 14, borderRadius: 12, backgroundColor: '#48654B', alignItems: 'center', justifyContent: 'center' },
   searchButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },

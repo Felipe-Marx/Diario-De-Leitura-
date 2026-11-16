@@ -1,9 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
-  Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,22 +10,19 @@ import {
   View,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
-import * as ImagePicker from 'expo-image-picker';
 
 import {
-  advancePage,
-  deleteBook,
   getBooks,
-  getReaderProfile,
-  startBook,
   updateCustomCover,
   type Book,
   type BookStatus,
-  type ReaderProfile,
 } from '@/db/books';
 import { getReaderTheme } from '@/constants/reader-themes';
+import { useReaderProfile } from '@/providers/reader-profile';
 import { saveImagePermanently } from '@/services/local-images';
 
 type Filter = 'todos' | BookStatus;
@@ -39,6 +35,14 @@ const palette = {
   line: '#E9E5DA',
 };
 
+const defaultProfile = {
+  display_name: 'Pessoa leitora',
+  avatar_uri: null,
+  theme_key: 'classic',
+  annual_goal: 12,
+  reader_term: 'neutral' as const,
+};
+
 const filterOptions: { key: Filter; label: string }[] = [
   { key: 'todos', label: 'Todos' },
   { key: 'lendo', label: 'Lendo' },
@@ -46,58 +50,58 @@ const filterOptions: { key: Filter; label: string }[] = [
   { key: 'concluido', label: 'Lidos' },
 ];
 
-function statusLabel(status: BookStatus) {
-  if (status === 'lendo') return 'EM LEITURA';
-  if (status === 'concluido') return 'CONCLUÍDO';
-  return 'NA LISTA';
+function ShortcutIcon({ kind, color, background, border }: { kind: 'map' | 'clock' | 'shelf'; color: string; background: string; border: string }) {
+  return (
+    <View style={[styles.shortcutIconFrame, { backgroundColor: background, borderColor: border }]}>
+      {kind === 'map' ? <View style={styles.mapGlyph}>{Array.from({ length: 9 }, (_, index) => <View key={index} style={[styles.mapCell, { backgroundColor: color, opacity: [0.35, 0.62, 0.9, 0.52, 1, 0.72, 0.82, 0.46, 0.65][index] }]} />)}</View> : null}
+      {kind === 'clock' ? <View style={[styles.clockGlyph, { borderColor: color }]}><View style={[styles.clockHand, styles.clockHourHand, { backgroundColor: color }]} /><View style={[styles.clockHand, styles.clockMinuteHand, { backgroundColor: color }]} /><View style={[styles.clockCenter, { backgroundColor: color }]} /></View> : null}
+      {kind === 'shelf' ? <View style={styles.shelfGlyph}>{[17, 22, 19].map((height, index) => <View key={index} style={[styles.shelfBookGlyph, { height, backgroundColor: color, opacity: [0.58, 1, 0.76][index] }]} />)}</View> : null}
+    </View>
+  );
+}
+
+function ShortcutArrow({ color, background, border }: { color: string; background: string; border: string }) {
+  return <View style={[styles.arrowFrame, { backgroundColor: background, borderColor: border }]}><Text style={[styles.arrowGlyph, { color }]}>›</Text></View>;
 }
 
 export default function HomeScreen() {
   const database = useSQLiteContext();
   const [books, setBooks] = useState<Book[]>([]);
+  const [booksLoaded, setBooksLoaded] = useState(false);
   const [filter, setFilter] = useState<Filter>('todos');
-  const [profile, setProfile] = useState<ReaderProfile>({
-    display_name: 'Pessoa leitora',
-    avatar_uri: null,
-    theme_key: 'classic',
-    annual_goal: 12,
-    reader_term: 'neutral',
-  });
+  const [selectedYear, setSelectedYear] = useState<number | null>(new Date().getFullYear());
+  const { profile: cachedProfile, loading: profileLoading } = useReaderProfile();
+  const profile = cachedProfile ?? defaultProfile;
   const theme = getReaderTheme(profile.theme_key);
 
   useFocusEffect(useCallback(() => {
-    void Promise.all([getBooks(database), getReaderProfile(database)]).then(([savedBooks, savedProfile]) => {
-      setBooks(savedBooks);
-      if (savedProfile) setProfile(savedProfile);
-    });
+    let active = true;
+    void getBooks(database)
+      .then((savedBooks) => { if (active) setBooks(savedBooks); })
+      .catch(() => {})
+      .finally(() => { if (active) setBooksLoaded(true); });
+    return () => { active = false; };
   }, [database]));
 
+  const availableYears = useMemo(() => {
+    const years = new Set<number>([new Date().getFullYear()]);
+    for (const book of books) {
+      for (const value of [book.started_at, book.completed_at]) {
+        if (value && /^\d{4}-/.test(value)) years.add(Number(value.slice(0, 4)));
+      }
+    }
+    return [...years].sort((a, b) => b - a);
+  }, [books]);
+  const yearBooks = useMemo(() => selectedYear === null ? books : books.filter((book) => {
+    const relevantDate = book.completed_at ?? book.started_at;
+    return relevantDate?.slice(0, 4) === String(selectedYear);
+  }), [books, selectedYear]);
   const visibleBooks = useMemo(
-    () => (filter === 'todos' ? books : books.filter((book) => book.status === filter)),
-    [books, filter],
+    () => (filter === 'todos' ? yearBooks : yearBooks.filter((book) => book.status === filter)),
+    [yearBooks, filter],
   );
-  const readingCount = books.filter((book) => book.status === 'lendo').length;
-  const finishedCount = books.filter((book) => book.status === 'concluido').length;
-
-  function confirmDelete(book: Book) {
-    Alert.alert('Remover livro?', `“${book.title}” será retirado da sua estante.`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Remover',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteBook(database, book.id);
-          setBooks(await getBooks(database));
-        },
-      },
-    ]);
-  }
-
-  async function updateBook(book: Book, action: 'start' | 'advance') {
-    if (action === 'start') await startBook(database, book.id);
-    else await advancePage(database, book);
-    setBooks(await getBooks(database));
-  }
+  const readingCount = yearBooks.filter((book) => book.status === 'lendo').length;
+  const finishedCount = books.filter((book) => book.status === 'concluido' && (selectedYear === null || book.completed_at?.slice(0, 4) === String(selectedYear))).length;
 
   function handleCoverMenu(book: Book) {
     const actions: { text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }[] = [
@@ -118,90 +122,34 @@ export default function HomeScreen() {
 
   async function pickCustomCover(book: Book) {
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [2, 3],
-        quality: 0.9,
-      });
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [2, 3], quality: 0.9 });
       if (result.canceled || !result.assets[0]) return;
-      const imageUri = await saveImagePermanently(result.assets[0].uri, `book-cover-${book.id}`);
-      await updateCustomCover(database, book.id, imageUri);
+      await updateCustomCover(database, book.id, await saveImagePermanently(result.assets[0].uri, `book-cover-${book.id}`));
       setBooks(await getBooks(database));
-    } catch {
-      Alert.alert('Não foi possível salvar a capa', 'Tente escolher outra imagem.');
-    }
+    } catch { Alert.alert('Não foi possível salvar a capa', 'Tente escolher outra imagem.'); }
   }
 
   function renderBook({ item }: { item: Book }) {
-    const progress = Math.round((item.current_page / item.total_pages) * 100);
+    const coverUri = item.custom_cover_uri ?? item.google_cover_uri;
     return (
-      <View style={[styles.bookCard, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
-        <View style={styles.bookTop}>
-          <View style={styles.coverColumn}>
-            <Pressable style={styles.cover} onPress={() => handleCoverMenu(item)} accessibilityLabel={`Personalizar capa de ${item.title}`}>
-              {item.custom_cover_uri || item.google_cover_uri ? (
-                <Image source={{ uri: item.custom_cover_uri ?? item.google_cover_uri ?? undefined }} style={styles.coverImage} />
-              ) : <Text style={[styles.coverMark, { color: theme.accent }]}>✳</Text>}
-            </Pressable>
-            <Pressable onPress={() => handleCoverMenu(item)}><Text style={[styles.coverEdit, { color: theme.accent }]}>capa</Text></Pressable>
-          </View>
-          <View style={styles.bookInfo}>
-            <Text style={[styles.bookTitle, { color: theme.ink, fontFamily: theme.headingFont }]}>{item.title}</Text>
-            <Text style={[styles.author, { color: theme.muted }]}>{item.author}</Text>
-            {item.google_volume_id && item.google_info_link && (
-              <Pressable onPress={() => void Linking.openURL(item.google_info_link as string)}>
-                <Text style={[styles.googleBookLink, { color: theme.accent }]}>Google Books ↗</Text>
-              </Pressable>
-            )}
-            <Text style={[styles.status, { color: theme.accent }]}>{statusLabel(item.status)}</Text>
-          </View>
-          <Pressable accessibilityLabel={`Remover ${item.title}`} onPress={() => confirmDelete(item)} hitSlop={10}>
-            <Text style={[styles.remove, { color: theme.muted }]}>×</Text>
-          </Pressable>
-        </View>
-        {item.status !== 'quero_ler' && (
-          <View style={styles.progressArea}>
-            <View style={styles.progressMeta}>
-              <Text style={[styles.progressText, { color: theme.muted }]}>{item.current_page} de {item.total_pages} páginas</Text>
-              <Text style={[styles.progressText, { color: theme.muted }]}>{progress}%</Text>
-            </View>
-            <View style={[styles.progressTrack, { backgroundColor: theme.soft }]}>
-              <View style={[styles.progressFill, { width: `${progress}%`, backgroundColor: theme.accent }]} />
-            </View>
-          </View>
-        )}
-        {item.status !== 'concluido' && (
-          <Pressable
-            accessibilityRole="button"
-            style={[styles.bookAction, { borderTopColor: theme.line }]}
-            onPress={() => void updateBook(item, item.status === 'quero_ler' ? 'start' : 'advance')}>
-            <Text style={[styles.bookActionText, { color: theme.accent }]}>
-              {item.status === 'quero_ler' ? 'Começar leitura' : '+ Registrar uma página'}
-            </Text>
-            <Text style={[styles.actionArrow, { color: theme.accent }]}>→</Text>
-          </Pressable>
-        )}
-        {item.status === 'concluido' && <Text style={[styles.finishedNote, { color: theme.accent }]}>Uma história a mais na memória ✨</Text>}
-        <Pressable style={[styles.notesLink, { borderTopColor: theme.line }]} onPress={() => router.push({ pathname: '/book/[id]', params: { id: String(item.id) } })}>
-          <Text style={[styles.notesLinkText, { color: theme.accent }]}>✎  Minhas anotações</Text>
-          <Text style={[styles.actionArrow, { color: theme.accent }]}>→</Text>
-        </Pressable>
-        <Pressable style={[styles.editLink, { borderTopColor: theme.line }]} onPress={() => router.push({ pathname: '/book/edit/[id]', params: { id: String(item.id) } })}>
-          <Text style={[styles.notesLinkText, { color: theme.muted }]}>Editar livro e progresso</Text>
-          <Text style={[styles.actionArrow, { color: theme.muted }]}>→</Text>
-        </Pressable>
-      </View>
+      <Pressable onPress={() => router.push({ pathname: '/book/[id]', params: { id: String(item.id) } })} onLongPress={() => handleCoverMenu(item)} accessibilityRole="button" accessibilityLabel={`Abrir ${item.title}; mantenha pressionado para personalizar a capa`} style={styles.coverTile}>
+        {coverUri ? <Image source={{ uri: coverUri }} style={[styles.coverImage, { borderRadius: theme.cardRadius }]} contentFit="cover" cachePolicy="disk" recyclingKey={coverUri} /> : <View style={[styles.coverImage, styles.coverPlaceholder, { backgroundColor: theme.soft, borderRadius: theme.cardRadius }]}><Text style={[styles.coverMark, { color: theme.accent }]}>✳</Text></View>}
+      </Pressable>
     );
+  }
+
+  if (profileLoading || !cachedProfile) {
+    return <SafeAreaView style={styles.loadingScreen}><ActivityIndicator color="#777B70" /></SafeAreaView>;
   }
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
       <FlatList
-        data={visibleBooks}
-        keyExtractor={(book) => String(book.id)}
-        renderItem={renderBook}
+        data={[]}
         contentContainerStyle={styles.listContent}
+        initialNumToRender={3}
+        maxToRenderPerBatch={4}
+        windowSize={7}
         ListHeaderComponent={
           <View>
             <View style={styles.topline}>
@@ -211,11 +159,11 @@ export default function HomeScreen() {
                   ? profile.reader_term === 'masculine' ? 'LEITOR' : profile.reader_term === 'feminine' ? 'LEITORA' : 'PESSOA LEITORA'
                   : profile.display_name).toLocaleUpperCase('pt-BR')} {theme.symbol}</Text>
                 <Text style={[styles.heading, { color: theme.ink, fontFamily: theme.headingFont }]}>Entre páginas,{ '\n' }<Text style={{ color: theme.accent, fontStyle: 'italic' }}>um mundo seu.</Text></Text>
-                <Text style={[styles.shelfCaption, { color: theme.muted }]}>Sua estante · {books.length} {books.length === 1 ? 'livro' : 'livros'}</Text>
+                <Text style={[styles.shelfCaption, { color: theme.muted }]}>{selectedYear === null ? 'Todos os anos' : `Estante ${selectedYear}`} · {yearBooks.length} {yearBooks.length === 1 ? 'livro' : 'livros'}</Text>
                 <Text style={[styles.ornament, { color: theme.accent }]}>{theme.ornament}</Text>
               </View>
               <Pressable onPress={() => router.push('/profile')} style={[styles.headerIcon, { backgroundColor: theme.soft, borderColor: theme.line }]} accessibilityRole="button" accessibilityLabel="Abrir perfil">
-                {profile.avatar_uri ? <Image source={{ uri: profile.avatar_uri }} style={styles.headerAvatar} /> : <Text style={[styles.headerIconText, { color: theme.accent }]}>{profile.display_name.trim().charAt(0).toUpperCase() || 'L'}</Text>}
+                {profile.avatar_uri ? <Image source={{ uri: profile.avatar_uri }} style={styles.headerAvatar} contentFit="cover" cachePolicy="memory-disk" /> : <Text style={[styles.headerIconText, { color: theme.accent }]}>{profile.display_name.trim().charAt(0).toUpperCase() || 'L'}</Text>}
               </Pressable>
             </View>
             <View style={[styles.summary, { backgroundColor: theme.accent }]}>
@@ -226,9 +174,26 @@ export default function HomeScreen() {
               <View style={[styles.summaryDivider, { backgroundColor: 'rgba(255,255,255,0.35)' }]} />
               <View style={styles.summaryItem}>
                 <Text style={[styles.summaryNumber, { color: theme.buttonText }]}>{finishedCount}</Text>
-                <Text style={[styles.summaryLabel, { color: theme.buttonText, opacity: 0.82 }]}>de {profile.annual_goal} na meta</Text>
+                <Text style={[styles.summaryLabel, { color: theme.buttonText, opacity: 0.82 }]}>{selectedYear === null ? 'total de livros concluídos' : `${selectedYear} · meta de ${profile.annual_goal}`}</Text>
               </View>
               <Text style={[styles.summaryFlower, { color: theme.buttonText }]}>{theme.symbol}</Text>
+            </View>
+            <View style={styles.shortcutList}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Abrir estatísticas e mapa de leitura" onPress={() => router.push('/stats')} style={[styles.shortcutCard, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
+                <ShortcutIcon kind="map" color={theme.accent} background={theme.soft} border={theme.line} />
+                <View style={styles.statisticsCopy}><Text style={[styles.statisticsTitle, { color: theme.ink }]}>Seu mapa de leitura</Text><Text style={[styles.statisticsSubtitle, { color: theme.muted }]}>Páginas por dia e estatísticas do ano</Text></View>
+                <ShortcutArrow color={theme.accent} background={theme.soft} border={theme.line} />
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={() => router.push('/in-progress')} style={[styles.shortcutCard, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
+                <ShortcutIcon kind="clock" color={theme.accent} background={theme.soft} border={theme.line} />
+                <View style={styles.statisticsCopy}><Text style={[styles.statisticsTitle, { color: theme.ink }]}>Em andamento</Text><Text style={[styles.statisticsSubtitle, { color: theme.muted }]}>Continue de onde você parou</Text></View>
+                <ShortcutArrow color={theme.accent} background={theme.soft} border={theme.line} />
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={() => router.push('/shelves')} style={[styles.shortcutCard, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
+                <ShortcutIcon kind="shelf" color={theme.accent} background={theme.soft} border={theme.line} />
+                <View style={styles.statisticsCopy}><Text style={[styles.statisticsTitle, { color: theme.ink }]}>Suas estantes</Text><Text style={[styles.statisticsSubtitle, { color: theme.muted }]}>Organize os livros em coleções</Text></View>
+                <ShortcutArrow color={theme.accent} background={theme.soft} border={theme.line} />
+              </Pressable>
             </View>
             <View style={styles.sectionHeading}>
               <View>
@@ -240,24 +205,41 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+              <Pressable onPress={() => setSelectedYear(null)} style={[styles.filterChip, { backgroundColor: selectedYear === null ? theme.soft : theme.paper, borderColor: theme.line }]}>
+                <Text style={[styles.filterText, { color: selectedYear === null ? theme.accent : theme.muted, fontWeight: selectedYear === null ? '700' : '500' }]}>Todos os anos</Text>
+              </Pressable>
+              {availableYears.map((year) => (
+                <Pressable key={year} onPress={() => setSelectedYear(year)} style={[styles.filterChip, { backgroundColor: selectedYear === year ? theme.soft : theme.paper, borderColor: theme.line }]}>
+                  <Text style={[styles.filterText, { color: selectedYear === year ? theme.accent : theme.muted, fontWeight: selectedYear === year ? '700' : '500' }]}>{year}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
               {filterOptions.map((option) => (
                 <Pressable key={option.key} onPress={() => setFilter(option.key)} style={[styles.filterChip, { backgroundColor: filter === option.key ? theme.soft : theme.paper, borderColor: theme.line }]}>
                   <Text style={[styles.filterText, { color: filter === option.key ? theme.accent : theme.muted, fontWeight: filter === option.key ? '700' : '500' }]}>{option.label}</Text>
                 </Pressable>
               ))}
             </ScrollView>
+            <Text style={[styles.coverHint, { color: theme.muted }]}>Toque em uma capa para abrir o livro. Mantenha pressionado para personalizá-la.</Text>
+            {visibleBooks.length > 0 ? <FlatList
+              horizontal
+              data={visibleBooks}
+              keyExtractor={(book) => String(book.id)}
+              renderItem={renderBook}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.coverRail}
+              initialNumToRender={5}
+              maxToRenderPerBatch={5}
+              windowSize={5}
+            /> : booksLoaded ? <View style={styles.emptyState}>
+              <Text style={[styles.emptyIcon, { color: theme.accent }]}>{theme.symbol}</Text>
+              <Text style={[styles.emptyTitle, { color: theme.ink }]}>{books.length === 0 ? 'Sua estante começa aqui' : 'Nada por aqui ainda'}</Text>
+              <Text style={[styles.emptyText, { color: theme.muted }]}>{books.length === 0 ? 'Adicione um livro para começar.' : 'Escolha outro filtro para ver seus livros.'}</Text>
+            </View> : null}
           </View>
         }
-        ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={[styles.emptyIcon, { color: theme.accent }]}>{theme.symbol}</Text>
-            <Text style={[styles.emptyTitle, { color: theme.ink }]}>{books.length === 0 ? 'Sua estante começa aqui' : 'Nada por aqui ainda'}</Text>
-            <Text style={[styles.emptyText, { color: theme.muted }]}>
-              {books.length === 0 ? 'Adicione o livro que está lendo ou quer ler.' : 'Escolha outro filtro para ver seus livros.'}
-            </Text>
-          </View>
-        }
-        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+        ListEmptyComponent={<View style={{ height: booksLoaded ? 0 : 44, alignItems: 'center', justifyContent: 'center' }}>{!booksLoaded && <ActivityIndicator color={theme.accent} />}</View>}
       />
 
     </SafeAreaView>
@@ -266,6 +248,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
+  loadingScreen: { flex: 1, backgroundColor: '#171717', alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingHorizontal: 22, paddingBottom: 38 },
   topline: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 14, paddingBottom: 22, position: 'relative' },
   heroDecoration: { position: 'absolute', right: 58, top: -7, fontSize: 76, lineHeight: 84, opacity: 0.09 },
@@ -282,6 +265,22 @@ const styles = StyleSheet.create({
   summaryLabel: { color: '#DCE5D8', fontSize: 12, marginTop: 2 },
   summaryDivider: { width: 1, height: 37, backgroundColor: '#82927D', marginHorizontal: 18 },
   summaryFlower: { color: '#D8B276', fontSize: 31, marginLeft: 'auto' },
+  shortcutList: { gap: 10, marginBottom: 25 },
+  shortcutCard: { minHeight: 76, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  shortcutIconFrame: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  mapGlyph: { width: 23, height: 23, flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
+  mapCell: { width: 5.5, height: 5.5, borderRadius: 1.5 },
+  clockGlyph: { width: 23, height: 23, borderWidth: 1.8, borderRadius: 12, position: 'relative' },
+  clockHand: { position: 'absolute', width: 1.8, borderRadius: 1, left: 10.6 },
+  clockHourHand: { height: 7, top: 4 }, clockMinuteHand: { height: 7, top: 8, transform: [{ rotate: '42deg' }] },
+  clockCenter: { position: 'absolute', width: 3, height: 3, borderRadius: 2, left: 10, top: 10 },
+  shelfGlyph: { height: 23, flexDirection: 'row', alignItems: 'flex-end', gap: 3 },
+  shelfBookGlyph: { width: 5, borderRadius: 1.5 },
+  arrowFrame: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  arrowGlyph: { fontSize: 21, lineHeight: 24, marginTop: -1 },
+  statisticsCopy: { flex: 1, gap: 4 },
+  statisticsTitle: { fontSize: 12, fontWeight: '700' },
+  statisticsSubtitle: { fontSize: 10 },
   sectionHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 17 },
   sectionTitle: { color: palette.ink, fontSize: 21, fontWeight: '700', letterSpacing: -0.4 },
   sectionSubtitle: { color: palette.muted, fontSize: 12, marginTop: 4 },
@@ -291,31 +290,12 @@ const styles = StyleSheet.create({
   filterChip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1 },
   filterText: { color: palette.muted, fontSize: 12, fontWeight: '500' },
   filterTextActive: { color: palette.green, fontWeight: '700' },
-  bookCard: { backgroundColor: palette.paper, borderRadius: 17, padding: 15, borderWidth: 1, borderColor: '#F0EDE4' },
-  bookTop: { flexDirection: 'row', alignItems: 'flex-start' },
-  coverColumn: { alignItems: 'center', gap: 2 },
-  cover: { width: 48, height: 65, borderRadius: 6, backgroundColor: '#E8D8C1', alignItems: 'center', justifyContent: 'center', borderLeftWidth: 4, borderLeftColor: '#D0B998', overflow: 'hidden' },
+  coverHint: { fontSize: 10, marginTop: -6, marginBottom: 12 },
+  coverRail: { gap: 12, paddingBottom: 12 },
+  coverTile: { width: 112, height: 164, borderRadius: 10, backgroundColor: '#E8D8C1', overflow: 'hidden', borderLeftWidth: 4, borderLeftColor: '#D0B998' },
   coverImage: { width: '100%', height: '100%' },
-  coverEdit: { fontSize: 8, fontWeight: '700' },
-  coverMark: { color: '#9B7653', fontSize: 22 },
-  bookInfo: { flex: 1, paddingLeft: 13, paddingTop: 2 },
-  bookTitle: { color: palette.ink, fontSize: 15, fontWeight: '700', lineHeight: 20 },
-  author: { color: palette.muted, fontSize: 12, marginTop: 4 },
-  googleBookLink: { color: palette.green, fontSize: 9, fontWeight: '700', marginTop: 5 },
-  status: { color: palette.green, fontSize: 9, letterSpacing: 1, fontWeight: '700', marginTop: 9 },
-  remove: { color: '#A6A79D', fontSize: 24, lineHeight: 24, paddingHorizontal: 4 },
-  progressArea: { marginTop: 15 },
-  progressMeta: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7 },
-  progressText: { color: palette.muted, fontSize: 11 },
-  progressTrack: { height: 5, borderRadius: 4, backgroundColor: '#EAE8DF', overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: palette.green, borderRadius: 4 },
-  bookAction: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: palette.line, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  bookActionText: { fontSize: 12, fontWeight: '700' },
-  actionArrow: { fontSize: 17 },
-  finishedNote: { fontSize: 11, marginTop: 14, fontStyle: 'italic' },
-  notesLink: { marginTop: 13, paddingTop: 11, borderTopWidth: 1, borderTopColor: palette.line, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  editLink: { marginTop: 9, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  notesLinkText: { fontSize: 12, fontWeight: '700' },
+  coverPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  coverMark: { fontSize: 28 },
   emptyState: { alignItems: 'center', paddingHorizontal: 25, paddingVertical: 38 },
   emptyIcon: { color: '#9AA58F', fontSize: 35, marginBottom: 12 },
   emptyTitle: { color: palette.ink, fontSize: 16, fontWeight: '700' },
