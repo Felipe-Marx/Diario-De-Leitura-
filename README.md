@@ -1,44 +1,42 @@
 # Diário de Leitura
 
-Aplicativo móvel para organizar leituras, acompanhar o progresso dos livros,
-registrar notas e personalizar o perfil de leitura.
+Aplicativo móvel para organizar livros, acompanhar leituras, escrever anotações e visualizar estatísticas pessoais. O app é local-first: a biblioteca fica no aparelho, sem conta ou sincronização em nuvem.
 
-## Visão geral
+## Funcionalidades
 
-O projeto foi criado com Expo, React Native, TypeScript e Expo Router. A
-primeira versão prioriza uma experiência simples e local:
-
-- estante pessoal de livros;
-- acompanhamento de páginas lidas;
-- notas associadas a cada livro;
-- busca opcional de livros pela Google Books API;
-- capas e avatar escolhidos pelo usuário;
-- temas visuais e meta anual de leitura.
-
-Os dados ficam armazenados localmente no dispositivo. A versão atual não
-possui conta, backup ou sincronização entre dispositivos.
+- Cadastro manual ou busca de livros na Google Books API.
+- Progresso por página, datas de início e conclusão, formato físico/Kindle e avaliação opcional de 1 a 5 estrelas.
+- Notas editáveis por livro.
+- Estantes personalizadas: vários livros por estante, com nome, cor, símbolo ou imagem própria.
+- Biblioteca horizontal por capas e seção “Em andamento”.
+- Estatísticas anuais, incluindo mapa de páginas lidas por dia.
+- Perfil com avatar, meta anual e quatro temas.
+- Exportação e restauração manual da biblioteca por arquivo, incluindo imagens.
 
 ## Tecnologias
 
-- Expo e React Native;
-- TypeScript;
-- Expo Router;
-- Expo SQLite;
-- Google Books API, para pesquisa opcional.
+Expo SDK 58, React Native 0.88, React 19, TypeScript 6, Expo Router e Expo SQLite. A busca online usa a Google Books API; o cadastro manual funciona sem conexão.
 
-## Status
+Para instalar dependências e iniciar o projeto:
 
-O MVP está em fase de testes internos. O foco atual é validar a experiência
-em aparelhos reais, corrigir problemas encontrados no uso cotidiano e
-refinar a publicação futura.
+```bash
+npm install
+npx expo start
+```
 
-## Privacidade
+Para gerar o APK interno Android, consulte [docs/BETA.md](./docs/BETA.md).
 
-Livros, notas, perfil e imagens são armazenados no espaço local do aplicativo.
-Não inclua informações sensíveis em ambientes de teste. A ausência de backup
-significa que a desinstalação do aplicativo ou a perda do dispositivo pode
-causar perda dos dados.
+## Armazenamento e privacidade
+
+Livros, progresso, notas, estantes, perfil e imagens são mantidos localmente. Não há conta nem sincronização. A exportação de backup é manual; restaurar um arquivo substitui os dados locais atuais. Guarde uma cópia do backup antes de restaurar. A busca de livros precisa de internet e envia o termo pesquisado à Google Books API.
+
+Antes de compartilhar o app, informe aos usuários que a perda do aparelho ou a desinstalação pode causar perda dos dados sem um backup recente.
+
+## Documentação
+
+- [Estado atual e pendências](./docs/ESTADO-ATUAL.md)
+- [Roteiro do beta Android](./docs/BETA.md)
 
 ## Licença
 
-Os termos de licenciamento serão definidos antes da publicação do código.
+A licença do projeto ainda precisa ser confirmada. O arquivo `LICENSE` presente no repositório contém texto padrão atribuído à Expo; não trate isso como a licença escolhida para o Diário de Leitura até que ela seja revisada.

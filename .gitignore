@@ -42,4 +42,8 @@ example
 /ios
 /android
 
-docs
+docs/*
+!docs/
+!docs/ASSETS-TEMAS.md
+!docs/BETA.md
+!docs/ESTADO-ATUAL.md
