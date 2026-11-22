@@ -14,6 +14,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
+import Svg, { Path } from 'react-native-svg';
 
 import {
   getBooks,
@@ -21,7 +22,10 @@ import {
   type Book,
   type BookStatus,
 } from '@/db/books';
-import { getReaderTheme } from '@/constants/reader-themes';
+import { getReaderTheme, normalizeReaderThemeKey } from '@/constants/reader-themes';
+import { ThemeSceneHeader } from '@/components/theme-scene-header';
+import { ClockIcon } from '@/components/clock-icon';
+import { formatRatingValue, RatingStars } from '@/components/rating-stars';
 import { useReaderProfile } from '@/providers/reader-profile';
 import { saveImagePermanently } from '@/services/local-images';
 
@@ -53,9 +57,18 @@ const filterOptions: { key: Filter; label: string }[] = [
 function ShortcutIcon({ kind, color, background, border }: { kind: 'map' | 'clock' | 'shelf'; color: string; background: string; border: string }) {
   return (
     <View style={[styles.shortcutIconFrame, { backgroundColor: background, borderColor: border }]}>
-      {kind === 'map' ? <View style={styles.mapGlyph}>{Array.from({ length: 9 }, (_, index) => <View key={index} style={[styles.mapCell, { backgroundColor: color, opacity: [0.35, 0.62, 0.9, 0.52, 1, 0.72, 0.82, 0.46, 0.65][index] }]} />)}</View> : null}
-      {kind === 'clock' ? <View style={[styles.clockGlyph, { borderColor: color }]}><View style={[styles.clockHand, styles.clockHourHand, { backgroundColor: color }]} /><View style={[styles.clockHand, styles.clockMinuteHand, { backgroundColor: color }]} /><View style={[styles.clockCenter, { backgroundColor: color }]} /></View> : null}
-      {kind === 'shelf' ? <View style={styles.shelfGlyph}>{[17, 22, 19].map((height, index) => <View key={index} style={[styles.shelfBookGlyph, { height, backgroundColor: color, opacity: [0.58, 1, 0.76][index] }]} />)}</View> : null}
+      {kind === 'map' ? (
+        <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+          <Path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0Z" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+          <Path d="M15 5.764v15M9 3.236v15" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      ) : null}
+      {kind === 'clock' ? <ClockIcon color={color} /> : null}
+      {kind === 'shelf' ? (
+        <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+          <Path d="m16 6 4 14M12 6v14M8 8v12M4 4v16" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      ) : null}
     </View>
   );
 }
@@ -73,6 +86,9 @@ export default function HomeScreen() {
   const { profile: cachedProfile, loading: profileLoading } = useReaderProfile();
   const profile = cachedProfile ?? defaultProfile;
   const theme = getReaderTheme(profile.theme_key);
+  const readerName = profile.display_name === 'Pessoa leitora'
+    ? profile.reader_term === 'masculine' ? 'LEITOR' : profile.reader_term === 'feminine' ? 'LEITORA' : 'PESSOA LEITORA'
+    : profile.display_name;
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -131,9 +147,19 @@ export default function HomeScreen() {
 
   function renderBook({ item }: { item: Book }) {
     const coverUri = item.custom_cover_uri ?? item.google_cover_uri;
+    const rating = item.rating;
+    const accessibilityLabel = rating === null
+      ? `Abrir ${item.title}; mantenha pressionado para personalizar a capa`
+      : `Abrir ${item.title}; avaliação ${formatRatingValue(rating)} de 5 estrelas; mantenha pressionado para personalizar a capa`;
     return (
-      <Pressable onPress={() => router.push({ pathname: '/book/[id]', params: { id: String(item.id) } })} onLongPress={() => handleCoverMenu(item)} accessibilityRole="button" accessibilityLabel={`Abrir ${item.title}; mantenha pressionado para personalizar a capa`} style={styles.coverTile}>
-        {coverUri ? <Image source={{ uri: coverUri }} style={[styles.coverImage, { borderRadius: theme.cardRadius }]} contentFit="cover" cachePolicy="disk" recyclingKey={coverUri} /> : <View style={[styles.coverImage, styles.coverPlaceholder, { backgroundColor: theme.soft, borderRadius: theme.cardRadius }]}><Text style={[styles.coverMark, { color: theme.accent }]}>✳</Text></View>}
+      <Pressable onPress={() => router.push({ pathname: '/book/[id]', params: { id: String(item.id) } })} onLongPress={() => handleCoverMenu(item)} accessibilityRole="button" accessibilityLabel={accessibilityLabel} style={styles.coverCard}>
+        <View style={[styles.coverTile, { borderRadius: theme.cardRadius }]}>
+          {coverUri ? <Image source={{ uri: coverUri }} style={styles.coverImage} contentFit="cover" cachePolicy="disk" recyclingKey={coverUri} /> : <View style={[styles.coverImage, styles.coverPlaceholder, { backgroundColor: theme.soft }]}><Text style={[styles.coverMark, { color: theme.accent }]}>✳</Text></View>}
+        </View>
+        {rating !== null && <View pointerEvents="none" style={[styles.coverRating, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
+          <RatingStars rating={rating} size={16} color="#D69E42" emptyColor={theme.line} />
+          <Text style={[styles.coverRatingValue, { color: theme.ink }]}>{formatRatingValue(rating)}</Text>
+        </View>}
       </Pressable>
     );
   }
@@ -152,20 +178,22 @@ export default function HomeScreen() {
         windowSize={7}
         ListHeaderComponent={
           <View>
-            <View style={styles.topline}>
-              <Text pointerEvents="none" style={[styles.heroDecoration, { color: theme.accent }]}>{theme.symbol}</Text>
-              <View>
-                <Text style={[styles.eyebrow, { color: theme.accent }]}>OLÁ, {(profile.display_name === 'Pessoa leitora'
-                  ? profile.reader_term === 'masculine' ? 'LEITOR' : profile.reader_term === 'feminine' ? 'LEITORA' : 'PESSOA LEITORA'
-                  : profile.display_name).toLocaleUpperCase('pt-BR')} {theme.symbol}</Text>
-                <Text style={[styles.heading, { color: theme.ink, fontFamily: theme.headingFont }]}>Entre páginas,{ '\n' }<Text style={{ color: theme.accent, fontStyle: 'italic' }}>um mundo seu.</Text></Text>
-                <Text style={[styles.shelfCaption, { color: theme.muted }]}>{selectedYear === null ? 'Todos os anos' : `Estante ${selectedYear}`} · {yearBooks.length} {yearBooks.length === 1 ? 'livro' : 'livros'}</Text>
-                <Text style={[styles.ornament, { color: theme.accent }]}>{theme.ornament}</Text>
-              </View>
-              <Pressable onPress={() => router.push('/profile')} style={[styles.headerIcon, { backgroundColor: theme.soft, borderColor: theme.line }]} accessibilityRole="button" accessibilityLabel="Abrir perfil">
+            <ThemeSceneHeader
+              themeKey={profile.theme_key}
+              eyebrow={`OLÁ, ${readerName.toLocaleUpperCase('pt-BR')} ${theme.symbol}`}
+              title={<>Entre páginas,{'\n'}<Text style={styles.homeTitleAccent}>um mundo seu.</Text></>}
+              subtitle={`${selectedYear === null ? 'Todos os anos' : `Estante ${selectedYear}`} · ${yearBooks.length} ${yearBooks.length === 1 ? 'livro' : 'livros'}`}
+              minHeight={208}
+              titleNumberOfLines={3}
+              copyMaxWidth={normalizeReaderThemeKey(profile.theme_key) === 'flowers' ? '82%' : undefined}
+              titleStyle={styles.homeTitle}
+              style={styles.homeScene}
+              accessory={
+                <Pressable onPress={() => router.push('/profile')} style={[styles.headerIcon, { backgroundColor: theme.paper, borderColor: '#FFFFFF' }]} accessibilityRole="button" accessibilityLabel="Abrir perfil">
                 {profile.avatar_uri ? <Image source={{ uri: profile.avatar_uri }} style={styles.headerAvatar} contentFit="cover" cachePolicy="memory-disk" /> : <Text style={[styles.headerIconText, { color: theme.accent }]}>{profile.display_name.trim().charAt(0).toUpperCase() || 'L'}</Text>}
-              </Pressable>
-            </View>
+                </Pressable>
+              }
+            />
             <View style={[styles.summary, { backgroundColor: theme.accent }]}>
               <View style={styles.summaryItem}>
                 <Text style={[styles.summaryNumber, { color: theme.buttonText }]}>{readingCount}</Text>
@@ -250,12 +278,9 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   loadingScreen: { flex: 1, backgroundColor: '#171717', alignItems: 'center', justifyContent: 'center' },
   listContent: { paddingHorizontal: 22, paddingBottom: 38 },
-  topline: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 14, paddingBottom: 22, position: 'relative' },
-  heroDecoration: { position: 'absolute', right: 58, top: -7, fontSize: 76, lineHeight: 84, opacity: 0.09 },
-  eyebrow: { color: palette.green, fontSize: 10, fontWeight: '700', letterSpacing: 1.8 },
-  heading: { color: palette.ink, fontSize: 34, lineHeight: 41, fontWeight: '700', letterSpacing: -0.7, marginTop: 12 },
-  shelfCaption: { color: palette.muted, fontSize: 11, letterSpacing: 0.2, marginTop: 9 },
-  ornament: { fontSize: 12, letterSpacing: 2, marginTop: 7 },
+  homeScene: { marginTop: 12, marginBottom: 20 },
+  homeTitle: { fontSize: 31, lineHeight: 37 },
+  homeTitleAccent: { fontStyle: 'italic' },
   headerIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginTop: 8, overflow: 'hidden', borderWidth: 1 },
   headerIconText: { fontSize: 19, fontWeight: '700' },
   headerAvatar: { width: 48, height: 48, borderRadius: 24 },
@@ -268,14 +293,6 @@ const styles = StyleSheet.create({
   shortcutList: { gap: 10, marginBottom: 25 },
   shortcutCard: { minHeight: 76, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
   shortcutIconFrame: { width: 44, height: 44, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  mapGlyph: { width: 23, height: 23, flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
-  mapCell: { width: 5.5, height: 5.5, borderRadius: 1.5 },
-  clockGlyph: { width: 23, height: 23, borderWidth: 1.8, borderRadius: 12, position: 'relative' },
-  clockHand: { position: 'absolute', width: 1.8, borderRadius: 1, left: 10.6 },
-  clockHourHand: { height: 7, top: 4 }, clockMinuteHand: { height: 7, top: 8, transform: [{ rotate: '42deg' }] },
-  clockCenter: { position: 'absolute', width: 3, height: 3, borderRadius: 2, left: 10, top: 10 },
-  shelfGlyph: { height: 23, flexDirection: 'row', alignItems: 'flex-end', gap: 3 },
-  shelfBookGlyph: { width: 5, borderRadius: 1.5 },
   arrowFrame: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   arrowGlyph: { fontSize: 21, lineHeight: 24, marginTop: -1 },
   statisticsCopy: { flex: 1, gap: 4 },
@@ -292,10 +309,13 @@ const styles = StyleSheet.create({
   filterTextActive: { color: palette.green, fontWeight: '700' },
   coverHint: { fontSize: 10, marginTop: -6, marginBottom: 12 },
   coverRail: { gap: 12, paddingBottom: 12 },
-  coverTile: { width: 112, height: 164, borderRadius: 10, backgroundColor: '#E8D8C1', overflow: 'hidden', borderLeftWidth: 4, borderLeftColor: '#D0B998' },
+  coverCard: { width: 112, alignItems: 'center' },
+  coverTile: { width: 112, height: 164, backgroundColor: '#E8D8C1', overflow: 'hidden', borderLeftWidth: 4, borderLeftColor: '#D0B998' },
   coverImage: { width: '100%', height: '100%' },
   coverPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   coverMark: { fontSize: 28 },
+  coverRating: { width: '100%', minHeight: 30, marginTop: 7, paddingHorizontal: 4, paddingVertical: 4, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3 },
+  coverRatingValue: { fontSize: 11, fontWeight: '700' },
   emptyState: { alignItems: 'center', paddingHorizontal: 25, paddingVertical: 38 },
   emptyIcon: { color: '#9AA58F', fontSize: 35, marginBottom: 12 },
   emptyTitle: { color: palette.ink, fontSize: 16, fontWeight: '700' },

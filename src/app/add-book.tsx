@@ -20,6 +20,7 @@ import { DateTimePicker } from '@expo/ui/community/datetime-picker';
 
 import { createBook } from '@/db/books';
 import { getReaderTheme, normalizeReaderThemeKey } from '@/constants/reader-themes';
+import { ThemeSceneHeader } from '@/components/theme-scene-header';
 import { searchGoogleBooks, type GoogleBook } from '@/services/google-books';
 import { saveImagePermanently } from '@/services/local-images';
 import { useReaderProfile } from '@/providers/reader-profile';
@@ -139,8 +140,15 @@ export default function AddBookScreen() {
           <Pressable onPress={() => router.back()} accessibilityRole="button"><Text style={[styles.back, { color: theme.accent }]}>‹ Voltar</Text></Pressable>
           <Text style={[styles.step, { color: theme.accent }]}>ESTANTE · NOVO LIVRO {theme.symbol}</Text>
         </View>
-        <Text style={[styles.title, { color: theme.ink, fontFamily: theme.headingFont }]}>Encontre seu{ '\n' }próximo capítulo.</Text>
-        <Text style={[styles.subtitle, { color: theme.muted }]}>Busque na biblioteca do Google ou preencha os dados por conta própria.</Text>
+        <ThemeSceneHeader
+          themeKey={profile.theme_key}
+          eyebrow="UM NOVO CAPÍTULO"
+          title="Encontre seu próximo capítulo."
+          subtitle="Busque na biblioteca do Google ou preencha os dados por conta própria."
+          minHeight={172}
+          titleNumberOfLines={3}
+          style={styles.sceneHeader}
+        />
 
         <Pressable
           accessibilityRole="link"
@@ -295,8 +303,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
   back: { color: '#48654B', fontWeight: '700', fontSize: 13 },
   step: { color: '#777B70', fontSize: 9, fontWeight: '700', letterSpacing: 1.2 },
-  title: { color: '#282D25', fontSize: 31, lineHeight: 35, fontWeight: '700', letterSpacing: -1, marginTop: 14 },
-  subtitle: { color: '#777B70', fontSize: 13, lineHeight: 19, marginTop: 9, marginBottom: 19 },
+  sceneHeader: { marginBottom: 18 },
   searchRow: { flexDirection: 'row', gap: 8 },
   formatOptions: { flexDirection: 'row', gap: 9, marginTop: 4, marginBottom: 9 },
   formatOption: { minHeight: 40, paddingHorizontal: 14, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },

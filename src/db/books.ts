@@ -53,7 +53,7 @@ export async function initializeDatabase(database: SQLiteDatabase) {
       total_pages INTEGER NOT NULL,
       current_page INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'quero_ler',
-      rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+      rating REAL CHECK (rating IS NULL OR (rating BETWEEN 0.5 AND 5 AND rating * 2 = CAST(rating * 2 AS INTEGER))),
       format TEXT,
       google_volume_id TEXT,
       google_info_link TEXT,
@@ -123,11 +123,12 @@ export async function initializeDatabase(database: SQLiteDatabase) {
     await database.execAsync('ALTER TABLE books ADD COLUMN completed_at TEXT');
   }
   if (!columns.some((column) => column.name === 'rating')) {
-    await database.execAsync('ALTER TABLE books ADD COLUMN rating INTEGER');
+    await database.execAsync('ALTER TABLE books ADD COLUMN rating REAL');
   }
   if (!columns.some((column) => column.name === 'format')) {
     await database.execAsync('ALTER TABLE books ADD COLUMN format TEXT');
   }
+  await migrateLegacyBookRatingConstraint(database);
   await database.execAsync(`
     CREATE INDEX IF NOT EXISTS books_completed_at_idx ON books(completed_at);
     CREATE INDEX IF NOT EXISTS reading_activity_date_idx ON reading_activity(reading_date);
@@ -165,6 +166,55 @@ export async function initializeDatabase(database: SQLiteDatabase) {
     await database.execAsync("ALTER TABLE reader_profile ADD COLUMN reader_term TEXT NOT NULL DEFAULT 'neutral'");
   }
   await database.runAsync("UPDATE reader_profile SET display_name = 'Pessoa leitora' WHERE id = 1 AND display_name = 'Leitora'");
+}
+
+async function migrateLegacyBookRatingConstraint(database: SQLiteDatabase) {
+  const booksSchema = await database.getFirstAsync<{ sql: string | null }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'books'",
+  );
+  if (!booksSchema?.sql || !/CHECK\s*\(\s*rating\s+BETWEEN\s+1\s+AND\s+5\s*\)/i.test(booksSchema.sql)) return;
+
+  // SQLite cannot alter an existing CHECK constraint, so rebuild the table while preserving its references.
+  await database.execAsync('PRAGMA foreign_keys = OFF');
+  try {
+    await database.withTransactionAsync(async () => {
+      await database.execAsync(`
+        CREATE TABLE books_half_star_migration (
+          id INTEGER PRIMARY KEY NOT NULL,
+          title TEXT NOT NULL,
+          author TEXT NOT NULL,
+          total_pages INTEGER NOT NULL,
+          current_page INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'quero_ler',
+          rating REAL CHECK (rating IS NULL OR (rating BETWEEN 0.5 AND 5 AND rating * 2 = CAST(rating * 2 AS INTEGER))),
+          format TEXT,
+          google_volume_id TEXT,
+          google_info_link TEXT,
+          google_cover_uri TEXT,
+          custom_cover_uri TEXT,
+          started_at TEXT,
+          completed_at TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT
+        );
+        INSERT INTO books_half_star_migration (
+          id, title, author, total_pages, current_page, status, rating, format,
+          google_volume_id, google_info_link, google_cover_uri, custom_cover_uri,
+          started_at, completed_at, created_at, updated_at
+        )
+        SELECT
+          id, title, author, total_pages, current_page, status, rating, format,
+          google_volume_id, google_info_link, google_cover_uri, custom_cover_uri,
+          started_at, completed_at, created_at, updated_at
+        FROM books;
+        DROP TABLE books;
+        ALTER TABLE books_half_star_migration RENAME TO books;
+        CREATE INDEX IF NOT EXISTS books_completed_at_idx ON books(completed_at);
+      `);
+    });
+  } finally {
+    await database.execAsync('PRAGMA foreign_keys = ON');
+  }
 }
 
 export function getBooks(database: SQLiteDatabase) {
@@ -236,6 +286,7 @@ export async function restoreLibraryBackup(database: SQLiteDatabase, data: Libra
       data.profile.reader_term,
     );
     for (const book of data.books) {
+      assertValidBookRating(book.rating ?? null);
       await database.runAsync(
         'INSERT INTO books (id, title, author, total_pages, current_page, status, rating, format, google_volume_id, google_info_link, google_cover_uri, custom_cover_uri, started_at, completed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         book.id, book.title, book.author, book.total_pages, book.current_page, book.status, book.rating ?? null, book.format ?? null,
@@ -340,6 +391,7 @@ export async function createBook(
   database: SQLiteDatabase,
   book: NewBook,
 ) {
+  assertValidBookRating(book.rating ?? null);
   await database.runAsync(
     'INSERT INTO books (title, author, total_pages, google_volume_id, google_info_link, google_cover_uri, custom_cover_uri, current_page, status, rating, format, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     book.title.trim(),
@@ -367,6 +419,7 @@ export async function updateBookDetails(
     format: Book['format'];
   },
 ) {
+  assertValidBookRating(book.rating);
   const status: BookStatus = book.completed_at || book.current_page >= book.total_pages
     ? 'concluido'
     : book.started_at || book.current_page > 0
@@ -396,7 +449,14 @@ export async function updateBookDetails(
 }
 
 export async function updateBookRating(database: SQLiteDatabase, bookId: number, rating: number | null) {
+  assertValidBookRating(rating);
   await database.runAsync('UPDATE books SET rating = ? WHERE id = ?', rating, bookId);
+}
+
+function assertValidBookRating(rating: number | null) {
+  if (rating !== null && (!Number.isFinite(rating) || rating < 0.5 || rating > 5 || !Number.isInteger(rating * 2))) {
+    throw new RangeError('A avaliação deve estar entre 0,5 e 5 estrelas, em intervalos de meia estrela.');
+  }
 }
 
 export async function updateCustomCover(database: SQLiteDatabase, id: number, uri: string | null) {

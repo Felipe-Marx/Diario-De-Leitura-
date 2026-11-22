@@ -19,6 +19,8 @@ import * as Sharing from 'expo-sharing';
 
 import { saveReaderProfile, type ReaderProfile } from '@/db/books';
 import { getReaderTheme, readerThemes, normalizeReaderThemeKey, type ReaderThemeKey } from '@/constants/reader-themes';
+import { readerThemeArtwork } from '@/constants/reader-theme-artwork';
+import { ThemeSceneHeader } from '@/components/theme-scene-header';
 import { createBackupFile, readBackupFile, restoreBackupFile, saveImagePermanently } from '@/services/local-images';
 import { useReaderProfile } from '@/providers/reader-profile';
 
@@ -164,10 +166,14 @@ export default function ProfileScreen() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Pressable onPress={() => router.back()} style={styles.backButton}><Text style={[styles.backText, { color: theme.accent }]}>‹  Minha estante</Text></Pressable>
-        <Text style={[styles.eyebrow, { color: theme.accent }]}>SEU ESPAÇO, DO SEU JEITO {theme.symbol}</Text>
-        <Text style={[styles.title, { color: theme.ink, fontFamily: theme.headingFont }]}>
-          {profile.reader_term === 'masculine' ? 'Perfil de leitor' : profile.reader_term === 'feminine' ? 'Perfil de leitora' : 'Seu perfil de leitura'}
-        </Text>
+        <ThemeSceneHeader
+          themeKey={profile.theme_key}
+          eyebrow="SEU ESPAÇO, DO SEU JEITO"
+          title={profile.reader_term === 'masculine' ? 'Perfil de leitor' : profile.reader_term === 'feminine' ? 'Perfil de leitora' : 'Seu perfil de leitura'}
+          subtitle="Personalize seu perfil, escolha um tema e acompanhe sua meta."
+          minHeight={155}
+          style={styles.profileScene}
+        />
 
         <View style={[styles.avatarSection, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
           <Pressable onPress={() => void handlePickAvatar()} style={[styles.avatar, { backgroundColor: theme.soft, borderColor: theme.line }]} accessibilityRole="button" accessibilityLabel="Escolher foto de perfil">
@@ -224,14 +230,25 @@ export default function ProfileScreen() {
                   key={themeKey}
                   onPress={() => updateProfile((current) => ({ ...current, theme_key: themeKey }))}
                   accessibilityRole="button"
+                  accessibilityLabel={`Tema ${option.label}`}
                   accessibilityState={{ selected }}
                   style={[styles.themeOption, { backgroundColor: option.paper, borderColor: selected ? option.accent : option.line, borderRadius: option.cardRadius }]}>
-                  <View style={[styles.themeSymbol, { backgroundColor: option.soft }]}><Text style={[styles.themeSymbolText, { color: option.accent }]}>{option.symbol}</Text></View>
+                  <View style={styles.themeThumb}>
+                    <Image
+                      source={readerThemeArtwork[themeKey].source}
+                      style={styles.themeThumbImage}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      accessibilityLabel={readerThemeArtwork[themeKey].description}
+                    />
+                    <View style={[styles.themeThumbSymbol, { backgroundColor: option.accent }]}>
+                      <Text style={[styles.themeSymbolText, { color: option.buttonText }]}>{option.symbol}</Text>
+                    </View>
+                  </View>
                   <View style={styles.themeCopy}>
                     <Text style={[styles.themeLabel, { color: option.ink }, selected && { color: option.accent }]}>{option.label}</Text>
                     <Text style={[styles.themeDescription, { color: option.muted }]}>{option.description}</Text>
                   </View>
-                  <View style={[styles.themeSwatch, { backgroundColor: option.accent }]} />
                   {selected && <Text style={[styles.check, { color: option.accent }]}>✓</Text>}
                 </Pressable>
               );
@@ -282,8 +299,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 23, paddingBottom: 36 },
   backButton: { paddingVertical: 13, alignSelf: 'flex-start' },
   backText: { fontSize: 12, fontWeight: '700' },
-  eyebrow: { color: '#777B70', fontSize: 9, letterSpacing: 1.5, fontWeight: '700', marginTop: 8 },
-  title: { color: '#282D25', fontSize: 29, fontWeight: '700', letterSpacing: -0.8, marginTop: 6 },
+  profileScene: { marginBottom: 16 },
   avatarSection: { alignItems: 'center', paddingVertical: 24, borderWidth: 1, marginTop: 16 },
   avatar: { width: 104, height: 104, borderRadius: 52, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   avatarImage: { width: 104, height: 104, borderRadius: 52 },
@@ -299,13 +315,14 @@ const styles = StyleSheet.create({
   termOptions: { gap: 8, marginTop: 12 },
   termOption: { minHeight: 46, borderWidth: 1, borderRadius: 11, justifyContent: 'center', paddingHorizontal: 14 },
   termOptionText: { fontSize: 13, fontWeight: '600' },
-  themeOption: { width: '48%', minHeight: 74, borderRadius: 13, borderWidth: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, gap: 7 },
-  themeSymbol: { width: 31, height: 31, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  themeSymbolText: { fontSize: 17, fontWeight: '700' },
+  themeOption: { width: '48%', minHeight: 74, borderRadius: 13, borderWidth: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 7, gap: 7 },
+  themeThumb: { width: 42, height: 56, borderRadius: 8, overflow: 'hidden', position: 'relative' },
+  themeThumbImage: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+  themeThumbSymbol: { position: 'absolute', bottom: 2, right: 2, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  themeSymbolText: { fontSize: 10, fontWeight: '700' },
   themeCopy: { flex: 1, gap: 3 },
   themeLabel: { color: '#585C53', fontSize: 10, fontWeight: '700' },
   themeDescription: { color: '#777B70', fontSize: 8, lineHeight: 11 },
-  themeSwatch: { width: 12, height: 12, borderRadius: 6 },
   check: { fontSize: 12, fontWeight: '700' },
   goalRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 11 },
   goalText: { color: '#585C53', fontSize: 12 },

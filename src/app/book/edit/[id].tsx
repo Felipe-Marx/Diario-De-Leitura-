@@ -7,6 +7,8 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import { getBooks, updateBookDetails, type Book } from '@/db/books';
 import { getReaderTheme } from '@/constants/reader-themes';
+import { ThemeSceneHeader } from '@/components/theme-scene-header';
+import { formatRatingValue, RatingStars } from '@/components/rating-stars';
 import { useReaderProfile } from '@/providers/reader-profile';
 
 export default function EditBookScreen() {
@@ -113,9 +115,14 @@ export default function EditBookScreen() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Pressable onPress={() => router.back()}><Text style={[styles.back, { color: theme.accent }]}>‹ Voltar</Text></Pressable>
-        <Text style={[styles.eyebrow, { color: theme.accent }]}>SUA ESTANTE {theme.symbol}</Text>
-        <Text style={[styles.title, { color: theme.ink, fontFamily: theme.headingFont }]}>Editar livro</Text>
-        <Text style={[styles.subtitle, { color: theme.muted }]}>Atualize os dados e ajuste o progresso para a página em que você está.</Text>
+        <ThemeSceneHeader
+          themeKey={profile.theme_key}
+          eyebrow={`SUA ESTANTE ${theme.symbol}`}
+          title="Editar livro"
+          subtitle="Atualize os dados e ajuste o progresso para a página em que você está."
+          minHeight={160}
+          style={styles.sceneHeader}
+        />
 
         {book ? (
           <View style={[styles.form, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
@@ -135,9 +142,9 @@ export default function EditBookScreen() {
             <Text style={[styles.label, { color: theme.ink }]}>Formato</Text>
             <View style={styles.choiceRow}>{([{ value: null, label: 'Não informado' }, { value: 'fisico', label: 'Físico' }, { value: 'kindle', label: 'eBook Kindle' }] as const).map((option) => <Pressable key={option.label} accessibilityRole="radio" accessibilityState={{ selected: format === option.value }} onPress={() => setFormat(option.value)} style={[styles.choice, { backgroundColor: format === option.value ? theme.soft : theme.background, borderColor: format === option.value ? theme.accent : theme.line }]}><Text style={{ color: format === option.value ? theme.accent : theme.muted, fontSize: 12, fontWeight: '600' }}>{option.label}</Text></Pressable>)}</View>
 
-            <Text style={[styles.label, { color: theme.ink }]}>Sua avaliação</Text>
-            <View style={styles.ratingRow}>{[1, 2, 3, 4, 5].map((star) => <Pressable key={star} accessibilityRole="button" accessibilityLabel={`${star} ${star === 1 ? 'estrela' : 'estrelas'}`} accessibilityState={{ selected: rating === star }} onPress={() => setRating(rating === star ? null : star)} hitSlop={5}><Text style={[styles.ratingStar, { color: rating !== null && star <= rating ? '#D69E42' : theme.line }]}>{rating !== null && star <= rating ? '★' : '☆'}</Text></Pressable>)}</View>
-            <Text style={[styles.helper, { color: theme.muted }]}>Toque novamente na avaliação para removê-la.</Text>
+            <Text style={[styles.label, { color: theme.ink }]}>{rating === null ? 'Sua avaliação' : `Sua avaliação · ${formatRatingValue(rating)}/5`}</Text>
+            <RatingStars rating={rating} size={30} color="#D69E42" emptyColor={theme.line} onSelect={setRating} />
+            <Text style={[styles.helper, { color: theme.muted }]}>Toque à esquerda para meia estrela e à direita para uma estrela inteira. Toque na nota atual para removê-la.</Text>
 
             <ReadingDateField label="Data de início da leitura (opcional)" value={startedAt} onChange={setStartedAt} isOpen={openDatePicker === 'started'} onOpen={() => setOpenDatePicker('started')} onClose={() => setOpenDatePicker(null)} theme={theme} />
         <ReadingDateField label="Data de conclusão (opcional)" value={completedAt} onChange={setCompletedAt} isOpen={openDatePicker === 'completed'} onOpen={() => setOpenDatePicker('completed')} onClose={() => setOpenDatePicker(null)} theme={theme} />
@@ -214,12 +221,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 22, paddingTop: 10, paddingBottom: 40 },
   choiceRow: { flexDirection: 'row', gap: 9, marginBottom: 7 },
   choice: { minHeight: 40, paddingHorizontal: 13, borderWidth: 1, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  ratingRow: { flexDirection: 'row', gap: 7, alignItems: 'center' },
-  ratingStar: { fontSize: 28 },
-  back: { fontSize: 13, fontWeight: '700', marginBottom: 27 },
-  eyebrow: { fontSize: 9, letterSpacing: 1.7, fontWeight: '700' },
-  title: { fontSize: 30, lineHeight: 36, fontWeight: '700', marginTop: 8 },
-  subtitle: { fontSize: 12, lineHeight: 19, marginTop: 8, marginBottom: 22 },
+  back: { fontSize: 13, fontWeight: '700', marginBottom: 14 },
+  sceneHeader: { marginBottom: 18 },
   form: { borderWidth: 1, padding: 15 },
   label: { fontSize: 11, fontWeight: '700', marginTop: 13, marginBottom: 6 },
   input: { height: 47, borderWidth: 1, borderRadius: 10, paddingHorizontal: 13, fontSize: 13 },

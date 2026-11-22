@@ -6,6 +6,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import { getCompletedBookCountByYear, getReadingActivityByYear, type ReadingActivity } from '@/db/books';
 import { getReaderTheme } from '@/constants/reader-themes';
+import { ThemeSceneHeader } from '@/components/theme-scene-header';
 import { useReaderProfile } from '@/providers/reader-profile';
 
 const today = new Date();
@@ -88,9 +89,14 @@ export default function StatisticsScreen() {
         <Pressable onPress={() => router.back()} accessibilityRole="button" style={styles.backButton}>
           <Text style={[styles.backText, { color: theme.accent }]}>‹  Minha estante</Text>
         </Pressable>
-        <Text style={[styles.eyebrow, { color: theme.accent }]}>SEU CAMINHO DE LEITURA {theme.symbol}</Text>
-        <Text style={[styles.title, { color: theme.ink, fontFamily: theme.headingFont }]}>Estatísticas</Text>
-        <Text style={[styles.subtitle, { color: theme.muted }]}>Cada página registrada deixa uma marca no seu ano.</Text>
+        <ThemeSceneHeader
+          themeKey={profile.theme_key}
+          eyebrow={`SEU CAMINHO DE LEITURA ${theme.symbol}`}
+          title="Estatísticas"
+          subtitle="Cada página registrada deixa uma marca no seu ano."
+          minHeight={150}
+          style={styles.sceneHeader}
+        />
 
         <View style={[styles.yearSelector, { backgroundColor: theme.paper, borderColor: theme.line, borderRadius: theme.cardRadius }]}>
           <Pressable onPress={() => changeYear(year - 1)} accessibilityRole="button" accessibilityLabel="Ver ano anterior" style={styles.yearArrow}>
@@ -271,9 +277,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 38 },
   backButton: { paddingVertical: 11, alignSelf: 'flex-start' },
   backText: { fontSize: 12, fontWeight: '700' },
-  eyebrow: { fontSize: 9, letterSpacing: 1.5, fontWeight: '700', marginTop: 8 },
-  title: { fontSize: 30, fontWeight: '700', marginTop: 5 },
-  subtitle: { fontSize: 12, lineHeight: 18, marginTop: 7 },
+  sceneHeader: { marginTop: 4, marginBottom: 18 },
   yearSelector: { minHeight: 48, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 19, paddingHorizontal: 15 },
   yearArrow: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   yearArrowText: { fontSize: 27, lineHeight: 30 },
